@@ -1,18 +1,17 @@
 // 수면 위치와 상승 속도를 관리한다.
 // 시간에 따라 수면 상승 속도를 증가시킨다.
-// Canvas 위에 수면 이미지를 생성하고 위치를 갱신한다.
+// 월드 공간에 수면 SpriteRenderer를 생성하고 갱신한다.
 // 플레이어와 수면 사이의 거리를 screen-space HUD TMP 텍스트로 표시한다.
 // 플레이어 기준으로 수면에 잠겼는지 검사한다.
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 public sealed class WaterManager : MonoBehaviour
 {
     [Header("Water Motion")]
-    [Tooltip("초기 수면 상승 속도. Canvas 좌표 단위/초 기준이다.")]
+    [Tooltip("초기 수면 상승 속도. 월드 단위/초 기준.")]
     [SerializeField]
-    private float baseWaterSpeed = 40f;
+    private float baseWaterSpeed = 0.42f;
 
     [Tooltip("수면 상승 속도 증가 간격. 이 시간마다 speedGrowthMultiplier만큼 성장한다.")]
     [SerializeField]
@@ -22,29 +21,41 @@ public sealed class WaterManager : MonoBehaviour
     [SerializeField]
     private float speedGrowthMultiplier = 1.05f;
 
-    [Tooltip("런 시작 시 수면을 화면 하단보다 얼마나 아래에 둘지 정한다. Canvas 좌표 단위 기준이다.")]
+    [Tooltip("런 시작 시 수면을 화면 하단보다 얼마나 아래에 둘지 정한다. 월드 단위 기준.")]
     [SerializeField]
-    private float initialOffsetBelowScreenBottom = 160f;
+    private float initialOffsetBelowViewportBottom = 4f;
 
     [Header("Visual")]
-    [Tooltip("수면 표시용 RectTransform. 비워두면 MapRoot 아래에 WaterVisual을 자동 생성한다.")]
+    [Tooltip("수면 표시용 Transform. 비워두면 MapRoot 아래에 WaterVisual을 자동 생성한다.")]
     [SerializeField]
-    private RectTransform waterVisual;
+    private Transform waterVisual;
 
-    [Tooltip("WaterVisual을 자동 생성할 때 사용할 색상이다.")]
+    [Tooltip("WaterVisual을 자동 생성할 때 사용할 색상.")]
     [SerializeField]
     private Color generatedWaterColor = new Color(0.1f, 0.45f, 1f, 0.55f);
+
+    [Tooltip("수면 표시 폭. 뷰포트 가로 길이에 곱한다.")]
+    [SerializeField]
+    private float waterWidthViewportMultiplier = 3f;
+
+    [Tooltip("수면 표시 높이. 뷰포트 세로 길이에 곱한다.")]
+    [SerializeField]
+    private float waterHeightViewportMultiplier = 2f;
+
+    [Tooltip("WaterVisual의 SpriteRenderer sortingOrder.")]
+    [SerializeField]
+    private int waterSortingOrder = -20;
 
     [Header("Distance Text")]
     [Tooltip("플레이어와 수면 사이의 거리를 표시할 TMP 텍스트. Canvas에 고정된 TextMeshProUGUI를 연결한다.")]
     [SerializeField]
     private TMP_Text waterDistanceText;
 
-    [Tooltip("텍스트를 고정할 screen-space UI 루트. 비워두면 mapRoot가 속한 root Canvas를 사용한다.")]
+    [Tooltip("텍스트를 고정할 screen-space UI 루트. 비워두면 Main Canvas를 사용한다.")]
     [SerializeField]
     private RectTransform distanceTextFixedRoot;
 
-    [Tooltip("켜면 distance text를 mapRoot에서 분리하고 화면 고정 UI로 배치한다.")]
+    [Tooltip("켜면 distance text를 화면 고정 UI 위치에 둔다.")]
     [SerializeField]
     private bool forceDistanceTextScreenFixed = true;
 
@@ -64,29 +75,32 @@ public sealed class WaterManager : MonoBehaviour
     [SerializeField]
     private float metersPerScreenHeight = 9f;
 
-    [Tooltip("거리 숫자 앞에 붙일 텍스트다. 숫자만 보이게 하려면 비워둔다.")]
+    [Tooltip("거리 숫자 앞에 붙일 텍스트. 숫자만 보이게 하려면 비워둔다.")]
     [SerializeField]
     private string distanceTextPrefix = "";
 
-    [Tooltip("거리 숫자 뒤에 붙일 텍스트다.")]
+    [Tooltip("거리 숫자 뒤에 붙일 텍스트.")]
     [SerializeField]
     private string distanceTextSuffix = "m";
 
     private RunManager runManager;
-    private RectTransform mapRoot;
-    private Vector2 viewportSize;
+    private Transform mapRoot;
+    private RectTransform canvasRect;
+    private Vector2 viewportWorldSize;
+    private SpriteRenderer waterRenderer;
     private float elapsedTime;
     private bool initialized;
 
     public float WaterSurfaceY { get; private set; }
 
-    public void Initialize(RunManager runManager, RectTransform mapRoot, Vector2 viewportSize)
+    public void Initialize(RunManager runManager, Transform mapRoot, Vector2 viewportWorldSize, RectTransform canvasRect)
     {
         this.runManager = runManager;
         this.mapRoot = mapRoot;
-        this.viewportSize = viewportSize;
+        this.viewportWorldSize = viewportWorldSize;
+        this.canvasRect = canvasRect;
         elapsedTime = 0f;
-        WaterSurfaceY = -viewportSize.y * 0.5f - initialOffsetBelowScreenBottom;
+        WaterSurfaceY = -viewportWorldSize.y * 0.5f - initialOffsetBelowViewportBottom;
         EnsureWaterVisual();
         EnsureDistanceTextFixedPlacement();
         RefreshDistanceText(Vector2.zero);
@@ -115,9 +129,17 @@ public sealed class WaterManager : MonoBehaviour
             return;
         }
 
-        waterVisual.anchoredPosition = new Vector2(playerWorldPosition.x, WaterSurfaceY);
-        waterVisual.sizeDelta = new Vector2(viewportSize.x * 10f, viewportSize.y * 2f);
-        waterVisual.SetAsLastSibling();
+        float width = Mathf.Max(0.01f, viewportWorldSize.x * waterWidthViewportMultiplier);
+        float height = Mathf.Max(0.01f, viewportWorldSize.y * waterHeightViewportMultiplier);
+        waterVisual.localPosition = new Vector3(playerWorldPosition.x, WaterSurfaceY - height * 0.5f, 0f);
+        waterVisual.localRotation = Quaternion.identity;
+        waterVisual.localScale = new Vector3(width, height, 1f);
+
+        if (waterRenderer != null)
+        {
+            waterRenderer.color = generatedWaterColor;
+            waterRenderer.sortingOrder = waterSortingOrder;
+        }
     }
 
     public bool IsPlayerSubmerged(Vector2 playerWorldPosition)
@@ -149,18 +171,17 @@ public sealed class WaterManager : MonoBehaviour
 
     private int CalculateDistanceMetersFromPlayer(Vector2 playerWorldPosition)
     {
-        if (viewportSize.y <= 0f || metersPerScreenHeight <= 0f)
+        if (viewportWorldSize.y <= 0f || metersPerScreenHeight <= 0f)
         {
             return 0;
         }
 
-        float distanceCanvasUnits = playerWorldPosition.y - WaterSurfaceY;
-        float clampedDistanceCanvasUnits = Mathf.Max(0f, distanceCanvasUnits);
-        float distanceMeters = clampedDistanceCanvasUnits / viewportSize.y * metersPerScreenHeight;
+        float distanceWorldUnits = playerWorldPosition.y - WaterSurfaceY;
+        float clampedDistanceWorldUnits = Mathf.Max(0f, distanceWorldUnits);
+        float distanceMeters = clampedDistanceWorldUnits / viewportWorldSize.y * metersPerScreenHeight;
         return Mathf.RoundToInt(distanceMeters);
     }
 
-    // Distance text를 mapRoot 같은 이동 계층에서 분리하고, Canvas 기준 고정 HUD 위치에 둔다.
     private void EnsureDistanceTextFixedPlacement()
     {
         if (!forceDistanceTextScreenFixed || waterDistanceText == null)
@@ -191,43 +212,32 @@ public sealed class WaterManager : MonoBehaviour
             return distanceTextFixedRoot;
         }
 
-        if (mapRoot == null)
-        {
-            return null;
-        }
-
-        Canvas rootCanvas = mapRoot.GetComponentInParent<Canvas>();
-        if (rootCanvas != null)
-        {
-            return rootCanvas.transform as RectTransform;
-        }
-
-        return mapRoot.root as RectTransform;
+        return canvasRect;
     }
 
     private void EnsureWaterVisual()
     {
-        if (waterVisual == null)
+        if (waterVisual == null && mapRoot != null)
         {
-            Transform found = mapRoot.Find("WaterVisual");
-            waterVisual = found as RectTransform;
+            waterVisual = mapRoot.Find("WaterVisual");
         }
 
         if (waterVisual == null)
         {
-            GameObject waterObject = new GameObject("WaterVisual", typeof(RectTransform), typeof(Image));
-            waterVisual = waterObject.GetComponent<RectTransform>();
+            GameObject waterObject = new GameObject("WaterVisual", typeof(SpriteRenderer));
+            waterVisual = waterObject.transform;
             waterVisual.SetParent(mapRoot, false);
-
-            Image image = waterObject.GetComponent<Image>();
-            image.color = generatedWaterColor;
-            image.raycastTarget = false;
         }
 
-        waterVisual.anchorMin = new Vector2(0.5f, 0.5f);
-        waterVisual.anchorMax = new Vector2(0.5f, 0.5f);
-        waterVisual.pivot = new Vector2(0.5f, 1f);
-        waterVisual.localScale = Vector3.one;
         waterVisual.localRotation = Quaternion.identity;
+        waterRenderer = waterVisual.GetComponent<SpriteRenderer>();
+        if (waterRenderer == null)
+        {
+            waterRenderer = waterVisual.gameObject.AddComponent<SpriteRenderer>();
+        }
+
+        waterRenderer.sprite = RuntimeSpriteFactory.GetSquareSprite();
+        waterRenderer.color = generatedWaterColor;
+        waterRenderer.sortingOrder = waterSortingOrder;
     }
 }

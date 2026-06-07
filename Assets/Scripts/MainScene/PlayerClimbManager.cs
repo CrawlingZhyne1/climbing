@@ -1,8 +1,8 @@
 // 플레이어 입력, 발사, 포물선 이동, 홀드 시도를 관리한다.
-// 캐릭터 손 기준점을 화면 중앙에 정렬한다.
-// 드래그 거리를 발사 속도로 변환하고, 비행 시간 배율로 실제 이동 속도만 조정한다.
-// 포물선 preview, 캐릭터 표시 크기, 손 위치 시각점을 Inspector에서 조정한다.
-// 손 위치 시각점, 드래그 원, 궤도 점, 홀드 버튼을 Canvas 위에 표시한다.
+// 캐릭터 손 기준점을 월드 원점에 정렬한다.
+// 드래그 거리를 월드 발사 속도로 변환한다.
+// 포물선 preview와 손 위치 시각점을 SpriteRenderer로 표시한다.
+// 홀드 버튼은 screen-space UI로 생성한다.
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -13,136 +13,124 @@ using UnityEngine.InputSystem;
 public sealed class PlayerClimbManager : MonoBehaviour
 {
     [Header("Prefabs")]
-    // 화면 중앙에 정렬할 캐릭터 UI 프리펩이다.
-    [Tooltip("화면 중앙에 정렬할 캐릭터 UI 프리펩.")]
+    [Tooltip("월드 원점에 정렬할 캐릭터 프리펩.")]
     [SerializeField]
     private GameObject characterPrefab;
 
-    // 드랍 지점에 생성할 홀드 시도 버튼 UI 프리펩이다.
     [Tooltip("드랍 지점에 생성할 홀드 시도 버튼 UI 프리펩.")]
     [SerializeField]
     private GameObject holdButtonPrefab;
 
     [Header("Launch")]
-    // 화면 가로 길이 대비 최대 드래그 거리 비율이다.
     [Tooltip("화면 가로 길이 대비 최대 드래그 거리 비율.")]
     [SerializeField]
     private float maxDragDistanceScreenWidthRatio = 1f / 6f;
 
-    // 풀 드래그 기준 초기 발사 속도다. 포물선 모양에 직접 영향을 준다.
-    [Tooltip("풀 드래그 기준 초기 발사 속도. 포물선 모양에 직접 영향을 준다.")]
+    [Tooltip("풀 드래그 기준 초기 발사 속도. 월드 단위/초 기준.")]
     [SerializeField]
-    private float maxLaunchSpeed = 2600f;
+    private float maxLaunchSpeed = 27f;
 
-    // 아래 방향 가속도다. 꼭지점 높이와 낙하감을 결정한다.
-    [Tooltip("아래 방향 가속도. 꼭지점 높이와 낙하감을 결정한다.")]
+    [Tooltip("아래 방향 가속도. 월드 단위/초^2 기준.")]
     [SerializeField]
-    private float gravity = 3800f;
+    private float gravity = 40f;
 
-    // 실제 비행 시간 진행 배율이다. 포물선 preview에는 영향을 주지 않는다.
     [Tooltip("실제 비행 시간 진행 배율. 포물선 preview에는 영향을 주지 않는다.")]
     [SerializeField]
     private float flightMotionSpeedMultiplier = 1f;
 
-    // 이 값보다 짧게 당기고 놓으면 발사하지 않는다.
-    [Tooltip("이 값보다 짧게 당기고 놓으면 발사하지 않는다.")]
+    [Tooltip("이 값보다 짧게 당기고 놓으면 발사하지 않는다. 화면 픽셀 기준.")]
     [SerializeField]
     private float minLaunchPullPixels = 24f;
 
-    // 터치 시작점보다 위로 이 픽셀 이상 올라가면 조준을 취소한다.
     [Tooltip("터치 시작점보다 위로 이 픽셀 이상 올라가면 조준을 취소한다.")]
     [SerializeField]
     private float cancelDeadZonePixels = 24f;
 
     [Header("Character Visual")]
-    // CharacterImage의 표시 크기 배율이다. 1이면 프리펩 원본 크기다.
-    [Tooltip("CharacterImage 표시 크기 배율. 1이면 프리펩 원본 크기.")]
+    [Tooltip("CharacterImage의 월드 표시 크기 배율.")]
     [SerializeField]
     private float characterVisualSizeMultiplier = 1f;
 
     [Header("Hold")]
-    // 캐릭터 손 위치를 표시하는 원의 지름이다. 판정에는 중앙점만 사용한다.
-    [Tooltip("캐릭터 손 위치를 표시하는 원의 지름. 판정에는 중앙점만 사용한다.")]
+    [Tooltip("캐릭터 손 위치를 표시하는 원의 월드 지름. 판정에는 중앙점만 사용한다.")]
     [SerializeField]
-    private float handPointVisualSize = 24f;
+    private float handPointVisualSize = 0.25f;
 
-    // 한 번의 발사에서 허용되는 홀드 시도 횟수다.
     [Tooltip("한 번의 발사에서 허용되는 홀드 시도 횟수.")]
     [SerializeField]
     private int maxHoldAttempts = 3;
 
-    // 홀드 실패 후 다음 홀드 시도까지의 대기 시간이다.
     [Tooltip("홀드 실패 후 다음 홀드 시도까지의 대기 시간.")]
     [SerializeField]
     private float holdAttemptCooldown = 0.5f;
 
-    // 홀드 버튼 입력을 인정하는 화면 픽셀 반경이다. 시각 크기와 별개다.
     [Tooltip("홀드 버튼 입력을 인정하는 화면 픽셀 반경. 시각 크기와 별개.")]
     [SerializeField]
     private float holdButtonTapRadiusPixels = 96f;
 
-    // 캐릭터 손 위치 시각 원의 표시 색상이다.
     [Tooltip("캐릭터 손 위치 시각 원의 표시 색상.")]
     [SerializeField]
     private Color handPointVisualColor = new Color(1f, 1f, 1f, 0.18f);
 
     [Header("Trajectory Preview")]
-    // 표시할 포물선 점 개수다. 값을 키우면 더 긴 시간 범위를 본다.
     [Tooltip("표시할 포물선 점 개수. 값을 키우면 더 긴 시간 범위를 본다.")]
     [SerializeField]
     private int trajectoryPointCount = 28;
 
-    // 포물선 점 사이의 시간 간격이다. 값을 키우면 더 멀리까지 본다.
     [Tooltip("포물선 점 사이의 시간 간격. 값을 키우면 더 멀리까지 본다.")]
     [SerializeField]
     private float trajectoryTimeStep = 0.055f;
 
-    // 포물선 점의 표시 크기다.
-    [Tooltip("포물선 점의 표시 크기.")]
+    [Tooltip("포물선 점의 월드 표시 지름.")]
     [SerializeField]
-    private float trajectoryPointSize = 14f;
+    private float trajectoryPointSize = 0.12f;
 
-    // 포물선 preview 표시 강도다. 실제 캐릭터 운동에는 영향이 없다.
     [Tooltip("포물선 preview 표시 강도. 실제 캐릭터 운동에는 영향이 없다.")]
     [SerializeField]
     private float trajectoryPreviewStrengthMultiplier = 1f;
 
-    // 포물선 점의 표시 색상이다.
     [Tooltip("포물선 점의 표시 색상.")]
     [SerializeField]
     private Color trajectoryPointColor = new Color(1f, 1f, 1f, 0.5f);
 
     [Header("Generated Visual Sizes")]
-    // 드래그 시작점 원의 표시 크기다.
-    [Tooltip("드래그 시작점 원의 표시 크기.")]
+    [Tooltip("드래그 시작점 원의 월드 표시 지름.")]
     [SerializeField]
-    private float dragStartCircleSize = 32f;
+    private float dragStartCircleSize = 0.25f;
 
-    // 현재 드래그 위치 원의 표시 크기다.
-    [Tooltip("현재 드래그 위치 원의 표시 크기.")]
+    [Tooltip("현재 드래그 위치 원의 월드 표시 지름.")]
     [SerializeField]
-    private float dragCurrentCircleSize = 42f;
+    private float dragCurrentCircleSize = 0.35f;
+
+    [Header("Sorting")]
+    [SerializeField]
+    private int characterSortingOrder = 20;
+
+    [SerializeField]
+    private int generatedVisualSortingOrder = 30;
 
     public Vector2 PlayerWorldPosition { get; private set; }
     public Vector2 Velocity => velocity;
+
     private RunManager runManager;
     private WorldChunkManager worldChunkManager;
     private WaterManager waterManager;
+    private Camera mainCamera;
     private RectTransform canvasRect;
-    private RectTransform gameplayVisualRoot;
+    private Transform gameplayVisualRoot;
     private RectTransform buttonRoot;
 
-    private RectTransform characterRoot;
-    private RectTransform characterImage;
-    private RectTransform holdingPoint;
-    private RectTransform dragStartCircle;
-    private RectTransform dragCurrentCircle;
-    private RectTransform handPointVisual;
+    private Transform characterRoot;
+    private Transform characterImage;
+    private Transform holdingPoint;
+    private Transform dragStartCircle;
+    private Transform dragCurrentCircle;
+    private Transform handPointVisual;
     private RectTransform holdButtonRoot;
     private Image holdButtonImage;
     private Vector2 holdButtonScreenPosition;
 
-    private readonly List<RectTransform> trajectoryPoints = new List<RectTransform>();
+    private readonly List<Transform> trajectoryPoints = new List<Transform>();
 
     private Vector2 velocity;
     private Vector2 pressScreenPosition;
@@ -161,14 +149,16 @@ public sealed class PlayerClimbManager : MonoBehaviour
         RunManager runManager,
         WorldChunkManager worldChunkManager,
         WaterManager waterManager,
+        Camera mainCamera,
         RectTransform canvasRect,
-        RectTransform gameplayVisualRoot,
+        Transform gameplayVisualRoot,
         RectTransform buttonRoot
     )
     {
         this.runManager = runManager;
         this.worldChunkManager = worldChunkManager;
         this.waterManager = waterManager;
+        this.mainCamera = mainCamera;
         this.canvasRect = canvasRect;
         this.gameplayVisualRoot = gameplayVisualRoot;
         this.buttonRoot = buttonRoot;
@@ -194,7 +184,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         DestroyHoldButton();
         RefreshCharacterVisualSizing();
         worldChunkManager.RefreshVisualTuning();
-        AlignHoldingPointToScreenCenter();
+        AlignHoldingPointToWorldCenter();
         RefreshHandPointVisual();
         worldChunkManager.SetMapOffset(PlayerWorldPosition);
     }
@@ -206,7 +196,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
             return;
         }
 
-        AlignHoldingPointToScreenCenter();
+        AlignHoldingPointToWorldCenter();
         RefreshHandPointVisual();
         worldChunkManager.RefreshVisualTuning();
 
@@ -220,17 +210,14 @@ public sealed class PlayerClimbManager : MonoBehaviour
                 break;
             case RunManager.RunState.Flying:
                 UpdateFlight(deltaTime);
-                worldChunkManager.UpdateChunks(PlayerWorldPosition, waterManager.WaterSurfaceY);
                 HandleHoldButtonInput();
                 break;
             case RunManager.RunState.HoldCooldown:
                 UpdateFlight(deltaTime);
-                worldChunkManager.UpdateChunks(PlayerWorldPosition, waterManager.WaterSurfaceY);
                 UpdateHoldCooldown(deltaTime);
                 break;
             case RunManager.RunState.FallingNoRescue:
                 UpdateFlight(deltaTime);
-                worldChunkManager.UpdateChunks(PlayerWorldPosition, waterManager.WaterSurfaceY);
                 break;
         }
     }
@@ -254,15 +241,11 @@ public sealed class PlayerClimbManager : MonoBehaviour
         }
 
         GameObject characterObject = Instantiate(characterPrefab, gameplayVisualRoot);
-        characterRoot = characterObject.GetComponent<RectTransform>();
-        if (characterRoot == null)
-        {
-            Debug.LogError("CharacterPrefab root requires RectTransform.");
-            enabled = false;
-            return;
-        }
+        characterRoot = characterObject.transform;
+        characterRoot.localPosition = Vector3.zero;
+        characterRoot.localRotation = Quaternion.identity;
+        characterRoot.localScale = Vector3.one;
 
-        PrepareRectTransform(characterRoot);
         characterImage = FindChildByName(characterRoot, "CharacterImage");
         holdingPoint = FindChildByName(characterRoot, "HoldingPoint");
 
@@ -273,9 +256,14 @@ public sealed class PlayerClimbManager : MonoBehaviour
             return;
         }
 
+        SpriteRenderer characterRenderer = characterImage.GetComponent<SpriteRenderer>();
+        if (characterRenderer != null)
+        {
+            characterRenderer.sortingOrder = characterSortingOrder;
+        }
+
         RefreshCharacterVisualSizing();
-        Canvas.ForceUpdateCanvases();
-        AlignHoldingPointToScreenCenter();
+        AlignHoldingPointToWorldCenter();
     }
 
     private void CreateGeneratedVisuals()
@@ -291,7 +279,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         trajectoryPoints.Clear();
         for (int i = 0; i < trajectoryPointCount; i++)
         {
-            RectTransform point = CreateCircle("TrajectoryPoint", gameplayVisualRoot, trajectoryPointSize, trajectoryPointColor);
+            Transform point = CreateCircle("TrajectoryPoint", gameplayVisualRoot, trajectoryPointSize, trajectoryPointColor);
             point.gameObject.SetActive(false);
             trajectoryPoints.Add(point);
         }
@@ -454,23 +442,24 @@ public sealed class PlayerClimbManager : MonoBehaviour
     private Vector2 CalculateLaunchVelocity(Vector2 clampedScreenPosition)
     {
         float maxDragDistance = Screen.width * maxDragDistanceScreenWidthRatio;
-        Vector2 aimVector = pressScreenPosition - clampedScreenPosition;
-        float pullRatio = Mathf.Clamp01(aimVector.magnitude / maxDragDistance);
-        if (aimVector.sqrMagnitude <= 0.0001f)
+        Vector2 aimScreenVector = pressScreenPosition - clampedScreenPosition;
+        Vector2 aimWorldVector = runManager.ScreenDeltaToWorldDelta(aimScreenVector);
+        float pullRatio = Mathf.Clamp01(aimScreenVector.magnitude / maxDragDistance);
+        if (aimWorldVector.sqrMagnitude <= 0.0001f)
         {
             return Vector2.zero;
         }
 
         float launchSpeed = maxLaunchSpeed * pullRatio;
-        return aimVector.normalized * launchSpeed;
+        return aimWorldVector.normalized * launchSpeed;
     }
 
     private void ShowAimingVisuals(Vector2 startScreenPosition, Vector2 currentScreenPosition)
     {
         dragStartCircle.gameObject.SetActive(true);
         dragCurrentCircle.gameObject.SetActive(true);
-        dragStartCircle.anchoredPosition = ScreenToCanvasLocal(startScreenPosition);
-        dragCurrentCircle.anchoredPosition = ScreenToCanvasLocal(currentScreenPosition);
+        dragStartCircle.position = ScreenToWorldPointOnGameplayPlane(startScreenPosition);
+        dragCurrentCircle.position = ScreenToWorldPointOnGameplayPlane(currentScreenPosition);
     }
 
     private void HideAimingVisuals()
@@ -492,15 +481,19 @@ public sealed class PlayerClimbManager : MonoBehaviour
         {
             float t = (i + 1) * trajectoryTimeStep;
             Vector2 offset = launchVelocity * t + new Vector2(0f, -0.5f * gravity * t * t);
-            RectTransform point = trajectoryPoints[i];
-            Image pointImage = point.GetComponent<Image>();
-            if (pointImage != null)
+            Transform point = trajectoryPoints[i];
+            SpriteRenderer pointRenderer = point.GetComponent<SpriteRenderer>();
+            if (pointRenderer != null)
             {
-                pointImage.color = trajectoryPointColor;
+                pointRenderer.color = trajectoryPointColor;
             }
 
             point.gameObject.SetActive(true);
-            point.anchoredPosition = offset * Mathf.Max(0f, trajectoryPreviewStrengthMultiplier);
+            point.localPosition = new Vector3(
+                offset.x * Mathf.Max(0f, trajectoryPreviewStrengthMultiplier),
+                offset.y * Mathf.Max(0f, trajectoryPreviewStrengthMultiplier),
+                0f
+            );
         }
     }
 
@@ -522,7 +515,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
             return;
         }
 
-        holdButtonScreenPosition = desiredScreenPosition;
+        holdButtonScreenPosition = ClampToSafeScreenArea(desiredScreenPosition);
         GameObject buttonObject = Instantiate(holdButtonPrefab, buttonRoot);
         holdButtonRoot = buttonObject.GetComponent<RectTransform>();
         if (holdButtonRoot == null)
@@ -533,10 +526,10 @@ public sealed class PlayerClimbManager : MonoBehaviour
         }
 
         PrepareRectTransform(holdButtonRoot);
-        holdButtonRoot.anchoredPosition = ScreenToCanvasLocal(desiredScreenPosition);
+        holdButtonRoot.anchoredPosition = ScreenToCanvasLocal(holdButtonScreenPosition);
         holdButtonRoot.gameObject.SetActive(true);
 
-        RectTransform holdButtonImageRect = FindChildByName(holdButtonRoot, "HoldButtonImage");
+        RectTransform holdButtonImageRect = FindChildRectByName(holdButtonRoot, "HoldButtonImage");
         holdButtonImage = holdButtonImageRect != null ? holdButtonImageRect.GetComponent<Image>() : null;
         if (holdButtonImageRect == null)
         {
@@ -567,7 +560,6 @@ public sealed class PlayerClimbManager : MonoBehaviour
         return holdButtonScreenPosition;
     }
 
-
     private void SetHoldButtonAlpha(float alpha)
     {
         if (holdButtonImage == null)
@@ -588,7 +580,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         }
 
         float safeCharacterMultiplier = Mathf.Max(0.01f, characterVisualSizeMultiplier);
-        float safeHandPointVisualSize = Mathf.Max(1f, handPointVisualSize);
+        float safeHandPointVisualSize = Mathf.Max(0.01f, handPointVisualSize);
 
         if (!Mathf.Approximately(appliedCharacterVisualSizeMultiplier, safeCharacterMultiplier))
         {
@@ -602,7 +594,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         }
     }
 
-    private void AlignHoldingPointToScreenCenter()
+    private void AlignHoldingPointToWorldCenter()
     {
         if (characterRoot == null || holdingPoint == null || gameplayVisualRoot == null)
         {
@@ -621,17 +613,42 @@ public sealed class PlayerClimbManager : MonoBehaviour
             return;
         }
 
-        float safeHandPointVisualSize = Mathf.Max(1f, handPointVisualSize);
-        handPointVisual.anchoredPosition = Vector2.zero;
-        handPointVisual.sizeDelta = new Vector2(safeHandPointVisualSize, safeHandPointVisualSize);
+        float safeHandPointVisualSize = Mathf.Max(0.01f, handPointVisualSize);
+        handPointVisual.localPosition = Vector3.zero;
+        handPointVisual.localRotation = Quaternion.identity;
+        handPointVisual.localScale = Vector3.one * safeHandPointVisualSize;
 
-        Image handPointImage = handPointVisual.GetComponent<Image>();
-        if (handPointImage != null)
+        SpriteRenderer handPointRenderer = handPointVisual.GetComponent<SpriteRenderer>();
+        if (handPointRenderer != null)
         {
-            handPointImage.color = handPointVisualColor;
+            handPointRenderer.color = handPointVisualColor;
         }
 
         handPointVisual.gameObject.SetActive(true);
+    }
+
+    private Vector2 ClampToSafeScreenArea(Vector2 screenPosition)
+    {
+        float margin = Mathf.Max(0f, holdButtonTapRadiusPixels);
+        return new Vector2(
+            Mathf.Clamp(screenPosition.x, margin, Mathf.Max(margin, Screen.width - margin)),
+            Mathf.Clamp(screenPosition.y, margin, Mathf.Max(margin, Screen.height - margin))
+        );
+    }
+
+    private Vector3 ScreenToWorldPointOnGameplayPlane(Vector2 screenPosition)
+    {
+        if (mainCamera == null)
+        {
+            return Vector3.zero;
+        }
+
+        float targetZ = gameplayVisualRoot != null ? gameplayVisualRoot.position.z : 0f;
+        float zDistance = targetZ - mainCamera.transform.position.z;
+        Vector3 screenPoint = new Vector3(screenPosition.x, screenPosition.y, zDistance);
+        Vector3 worldPoint = mainCamera.ScreenToWorldPoint(screenPoint);
+        worldPoint.z = targetZ;
+        return worldPoint;
     }
 
     private Vector2 ScreenToCanvasLocal(Vector2 screenPosition)
@@ -860,19 +877,20 @@ public sealed class PlayerClimbManager : MonoBehaviour
     }
 #endif
 
-    private static RectTransform CreateCircle(string objectName, RectTransform parent, float size, Color color)
+    private Transform CreateCircle(string objectName, Transform parent, float diameter, Color color)
     {
-        GameObject circleObject = new GameObject(objectName, typeof(RectTransform), typeof(Image));
-        RectTransform rectTransform = circleObject.GetComponent<RectTransform>();
-        rectTransform.SetParent(parent, false);
-        PrepareRectTransform(rectTransform);
-        rectTransform.sizeDelta = new Vector2(size, size);
+        GameObject circleObject = new GameObject(objectName, typeof(SpriteRenderer));
+        Transform circleTransform = circleObject.transform;
+        circleTransform.SetParent(parent, false);
+        circleTransform.localPosition = Vector3.zero;
+        circleTransform.localRotation = Quaternion.identity;
+        circleTransform.localScale = Vector3.one * Mathf.Max(0.01f, diameter);
 
-        Image image = circleObject.GetComponent<Image>();
-        image.sprite = CircleSpriteProvider.GetCircleSprite();
-        image.color = color;
-        image.raycastTarget = false;
-        return rectTransform;
+        SpriteRenderer renderer = circleObject.GetComponent<SpriteRenderer>();
+        renderer.sprite = RuntimeSpriteFactory.GetCircleSprite();
+        renderer.color = color;
+        renderer.sortingOrder = generatedVisualSortingOrder;
+        return circleTransform;
     }
 
     private static void PrepareRectTransform(RectTransform rectTransform)
@@ -884,7 +902,21 @@ public sealed class PlayerClimbManager : MonoBehaviour
         rectTransform.localRotation = Quaternion.identity;
     }
 
-    private static RectTransform FindChildByName(RectTransform root, string childName)
+    private static Transform FindChildByName(Transform root, string childName)
+    {
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            if (children[i].name == childName)
+            {
+                return children[i];
+            }
+        }
+
+        return null;
+    }
+
+    private static RectTransform FindChildRectByName(RectTransform root, string childName)
     {
         RectTransform[] children = root.GetComponentsInChildren<RectTransform>(true);
         for (int i = 0; i < children.Length; i++)
@@ -898,7 +930,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         return null;
     }
 
-    private static void ClearChildren(RectTransform root)
+    private static void ClearChildren(Transform root)
     {
         if (root == null)
         {
@@ -908,44 +940,6 @@ public sealed class PlayerClimbManager : MonoBehaviour
         for (int i = root.childCount - 1; i >= 0; i--)
         {
             Destroy(root.GetChild(i).gameObject);
-        }
-    }
-
-    private static class CircleSpriteProvider
-    {
-        private static Sprite circleSprite;
-
-        public static Sprite GetCircleSprite()
-        {
-            if (circleSprite != null)
-            {
-                return circleSprite;
-            }
-
-            const int size = 64;
-            Texture2D texture = new Texture2D(size, size, TextureFormat.ARGB32, false);
-            texture.hideFlags = HideFlags.HideAndDontSave;
-            texture.filterMode = FilterMode.Bilinear;
-
-            Color clear = new Color(1f, 1f, 1f, 0f);
-            Color solid = Color.white;
-            Vector2 center = new Vector2((size - 1) * 0.5f, (size - 1) * 0.5f);
-            float radius = (size - 1) * 0.5f;
-            float radiusSquared = radius * radius;
-
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    Vector2 point = new Vector2(x, y);
-                    texture.SetPixel(x, y, (point - center).sqrMagnitude <= radiusSquared ? solid : clear);
-                }
-            }
-
-            texture.Apply();
-            circleSprite = Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
-            circleSprite.hideFlags = HideFlags.HideAndDontSave;
-            return circleSprite;
         }
     }
 }

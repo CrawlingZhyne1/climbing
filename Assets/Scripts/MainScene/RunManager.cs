@@ -1,9 +1,8 @@
 // MainScene의 런 초기화와 상태 전환을 관리한다.
-// Canvas 기준 좌표계와 생성 루트를 준비한다.
+// Camera 기준 월드 좌표계와 생성 루트를 준비한다.
 // 5개 매니저의 초기화 순서를 통제한다.
 // 매 프레임 수면, 플레이어, 청크 갱신을 호출한다.
 // R 키 입력 시 현재 런을 즉시 초기화한다.
-// 게임오버 진입 시 이동과 입력을 정지시킨다.
 using UnityEngine;
 using UnityEngine.UI;
 #if ENABLE_INPUT_SYSTEM
@@ -41,17 +40,21 @@ public sealed class RunManager : MonoBehaviour
     [SerializeField]
     private WaterManager waterManager;
 
-    [Header("Canvas Roots")]
+    [Header("World Roots")]
     [SerializeField]
-    private RectTransform mapRoot;
+    private Transform worldRoot;
 
     [SerializeField]
-    private RectTransform gameplayVisualRoot;
+    private Transform mapRoot;
 
+    [SerializeField]
+    private Transform gameplayVisualRoot;
+
+    [Header("UI Roots")]
     [SerializeField]
     private RectTransform buttonRoot;
 
-    [Header("Reference Canvas")]
+    [Header("Reference UI")]
     [SerializeField]
     private Vector2 referenceResolution = new Vector2(1080f, 1920f);
 
@@ -67,10 +70,12 @@ public sealed class RunManager : MonoBehaviour
 
     public RunState State { get; private set; } = RunState.GameOver;
     public RectTransform CanvasRect { get; private set; }
-    public RectTransform MapRoot => mapRoot;
-    public RectTransform GameplayVisualRoot => gameplayVisualRoot;
+    public Transform WorldRoot => worldRoot;
+    public Transform MapRoot => mapRoot;
+    public Transform GameplayVisualRoot => gameplayVisualRoot;
     public RectTransform ButtonRoot => buttonRoot;
-    public Vector2 ViewportSize { get; private set; }
+    public Vector2 ViewportWorldSize { get; private set; }
+    public float WorldUnitsPerScreenPixelY { get; private set; }
     public bool IsRunning => State != RunState.GameOver;
 
     private bool initialized;
@@ -129,17 +134,32 @@ public sealed class RunManager : MonoBehaviour
     public void BeginRun()
     {
         ResolveReferences();
+        if (!enabled)
+        {
+            return;
+        }
+
         ConfigureCanvas();
         ConfigureCamera();
+        RefreshViewportWorldSize();
 
-        mapRoot = EnsureCanvasRoot(mapRoot, "MapRoot");
-        gameplayVisualRoot = EnsureCanvasRoot(gameplayVisualRoot, "GameplayVisualRoot");
+        worldRoot = EnsureSceneRoot(worldRoot, "WorldRoot");
+        mapRoot = EnsureWorldChildRoot(mapRoot, worldRoot, "MapRoot");
+        gameplayVisualRoot = EnsureWorldChildRoot(gameplayVisualRoot, worldRoot, "GameplayVisualRoot");
         buttonRoot = EnsureCanvasRoot(buttonRoot, "ButtonRoot");
 
         randomManager.BeginNewRun();
-        worldChunkManager.Initialize(this, randomManager, mapRoot, ViewportSize);
-        playerClimbManager.Initialize(this, worldChunkManager, waterManager, CanvasRect, gameplayVisualRoot, buttonRoot);
-        waterManager.Initialize(this, mapRoot, ViewportSize);
+        worldChunkManager.Initialize(this, randomManager, mapRoot, ViewportWorldSize);
+        playerClimbManager.Initialize(
+            this,
+            worldChunkManager,
+            waterManager,
+            mainCamera,
+            CanvasRect,
+            gameplayVisualRoot,
+            buttonRoot
+        );
+        waterManager.Initialize(this, mapRoot, ViewportWorldSize, CanvasRect);
 
         SetState(RunState.Holding);
         playerClimbManager.ResetForNewRun(Vector2.zero);
@@ -173,6 +193,16 @@ public sealed class RunManager : MonoBehaviour
 
         State = RunState.GameOver;
         playerClimbManager.OnGameOver();
+    }
+
+    public Vector2 ScreenDeltaToWorldDelta(Vector2 screenDelta)
+    {
+        float safeScreenWidth = Mathf.Max(1f, Screen.width);
+        float safeScreenHeight = Mathf.Max(1f, Screen.height);
+        return new Vector2(
+            screenDelta.x / safeScreenWidth * ViewportWorldSize.x,
+            screenDelta.y / safeScreenHeight * ViewportWorldSize.y
+        );
     }
 
     private void ResolveReferences()
@@ -214,6 +244,13 @@ public sealed class RunManager : MonoBehaviour
             return;
         }
 
+        if (mainCamera == null)
+        {
+            Debug.LogError("RunManager requires a Main Camera in MainScene.");
+            enabled = false;
+            return;
+        }
+
         if (randomManager == null || worldChunkManager == null || playerClimbManager == null || waterManager == null)
         {
             Debug.LogError("RunManager requires GameRandomManager, WorldChunkManager, PlayerClimbManager, and WaterManager.");
@@ -251,23 +288,69 @@ public sealed class RunManager : MonoBehaviour
         }
 
         Canvas.ForceUpdateCanvases();
-        ViewportSize = CanvasRect.rect.size;
-
-        if (ViewportSize.x <= 0f || ViewportSize.y <= 0f)
-        {
-            ViewportSize = referenceResolution;
-        }
     }
 
     private void ConfigureCamera()
     {
-        if (mainCamera == null)
+        mainCamera.orthographic = true;
+        mainCamera.orthographicSize = Mathf.Max(0.01f, orthographicSize);
+    }
+
+    private void RefreshViewportWorldSize()
+    {
+        float height = mainCamera.orthographicSize * 2f;
+        float aspect = mainCamera.aspect;
+
+        if (aspect <= 0f)
         {
-            return;
+            aspect = Screen.width > 0 && Screen.height > 0 ? (float)Screen.width / Screen.height : referenceResolution.x / referenceResolution.y;
         }
 
-        mainCamera.orthographic = true;
-        mainCamera.orthographicSize = orthographicSize;
+        ViewportWorldSize = new Vector2(height * aspect, height);
+        WorldUnitsPerScreenPixelY = ViewportWorldSize.y / Mathf.Max(1f, Screen.height);
+    }
+
+    private static Transform EnsureSceneRoot(Transform existingRoot, string rootName)
+    {
+        Transform root = existingRoot;
+        if (root == null)
+        {
+            GameObject found = GameObject.Find(rootName);
+            root = found != null ? found.transform : null;
+        }
+
+        if (root == null)
+        {
+            GameObject rootObject = new GameObject(rootName);
+            root = rootObject.transform;
+        }
+
+        root.SetParent(null, false);
+        root.position = Vector3.zero;
+        root.rotation = Quaternion.identity;
+        root.localScale = Vector3.one;
+        return root;
+    }
+
+    private static Transform EnsureWorldChildRoot(Transform existingRoot, Transform parent, string rootName)
+    {
+        Transform root = existingRoot;
+        if (root == null && parent != null)
+        {
+            root = parent.Find(rootName);
+        }
+
+        if (root == null)
+        {
+            GameObject rootObject = new GameObject(rootName);
+            root = rootObject.transform;
+        }
+
+        root.SetParent(parent, false);
+        root.localPosition = Vector3.zero;
+        root.localRotation = Quaternion.identity;
+        root.localScale = Vector3.one;
+        return root;
     }
 
     private RectTransform EnsureCanvasRoot(RectTransform existingRoot, string rootName)
@@ -290,7 +373,7 @@ public sealed class RunManager : MonoBehaviour
         root.anchorMax = new Vector2(0.5f, 0.5f);
         root.pivot = new Vector2(0.5f, 0.5f);
         root.anchoredPosition = Vector2.zero;
-        root.sizeDelta = ViewportSize;
+        root.sizeDelta = CanvasRect != null ? CanvasRect.rect.size : referenceResolution;
         root.localScale = Vector3.one;
         root.localRotation = Quaternion.identity;
         return root;

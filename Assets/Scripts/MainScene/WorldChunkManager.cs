@@ -1,73 +1,69 @@
-// Canvas 좌표계에서 청크와 홀드를 생성한다.
+// 월드 좌표계에서 청크와 홀드를 생성한다.
 // 현재 플레이어 위치와 수면 위치를 기준으로 활성 청크를 유지한다.
 // 각 청크에는 시드 기반으로 8~12개의 홀드를 배치한다.
-// 각 홀드 이미지 위에 성공 기준 원을 표시한다.
+// 각 홀드 이미지 뒤에 성공 기준 원을 표시한다.
 // 캐릭터 손 중앙점이 성공 기준 원 안에 들어왔는지 검사한다.
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 
 public sealed class WorldChunkManager : MonoBehaviour
 {
     [Header("Prefab")]
-    // 청크 안에 생성할 홀드 UI 프리펩이다.
-    [Tooltip("청크 안에 생성할 홀드 UI 프리펩.")]
+    [Tooltip("청크 안에 생성할 월드 홀드 프리펩.")]
     [SerializeField]
     private GameObject holdPrefab;
 
     [Header("Chunk Range")]
-    // 현재 청크 기준 좌우로 유지할 청크 개수다.
     [Tooltip("현재 청크 기준 좌우로 유지할 청크 개수.")]
     [SerializeField]
     private int horizontalChunkRadius = 3;
 
-    // 현재 화면 위쪽으로 미리 유지할 화면 단위 개수다.
     [Tooltip("현재 화면 위쪽으로 미리 유지할 화면 단위 개수.")]
     [SerializeField]
     private int verticalScreenAhead = 3;
 
     [Header("Hold Placement")]
-    // 청크 하나에 배치할 최소 홀드 개수다.
     [Tooltip("청크 하나에 배치할 최소 홀드 개수.")]
     [SerializeField]
     private int minHoldCount = 8;
 
-    // 청크 하나에 배치할 최대 홀드 개수다.
     [Tooltip("청크 하나에 배치할 최대 홀드 개수.")]
     [SerializeField]
     private int maxHoldCount = 12;
 
-    // 화면 가로 길이 대비 홀드 사이 최소 거리 비율이다.
-    [Tooltip("화면 가로 길이 대비 홀드 사이 최소 거리 비율.")]
+    [Tooltip("뷰포트 가로 길이 대비 홀드 사이 최소 거리 비율.")]
     [SerializeField]
-    private float minHoldDistanceScreenWidthRatio = 1f / 8f;
+    private float minHoldDistanceViewportWidthRatio = 1f / 8f;
 
-    // 화면 가로 길이 대비 청크 테두리 여백 비율이다.
-    [Tooltip("화면 가로 길이 대비 청크 테두리 여백 비율.")]
+    [Tooltip("뷰포트 가로 길이 대비 청크 테두리 여백 비율.")]
     [SerializeField]
-    private float edgeMarginScreenWidthRatio = 1f / 32f;
+    private float edgeMarginViewportWidthRatio = 1f / 32f;
 
-    // 홀드 하나를 배치할 때 허용하는 최대 재시도 횟수다.
     [Tooltip("홀드 하나를 배치할 때 허용하는 최대 재시도 횟수.")]
     [SerializeField]
     private int maxPlacementAttemptsPerHold = 30;
 
     [Header("Hold Visual")]
-    // HoldImage의 표시 크기 배율이다. 1이면 프리펩 원본 크기다.
-    [Tooltip("HoldImage 표시 크기 배율. 1이면 프리펩 원본 크기.")]
+    [Tooltip("HoldImage의 월드 표시 크기. Sprite의 긴 축이 이 값에 맞춰진다.")]
     [SerializeField]
-    private float holdVisualSizeMultiplier = 1f;
+    private float holdVisualSize = 0.75f;
+
+    [Tooltip("HoldImage의 SpriteRenderer sortingOrder.")]
+    [SerializeField]
+    private int holdSortingOrder = 10;
 
     [Header("Hold Success Circle")]
-    // 홀드 성공 기준 원의 반지름이다. 캐릭터 손 중앙점이 이 원 안에 들어오면 홀드 성공이다.
     [Tooltip("홀드 성공 기준 원의 반지름. 캐릭터 손 중앙점이 이 원 안에 들어오면 홀드 성공.")]
     [SerializeField]
-    private float holdSuccessCircleRadius = 80f;
+    private float holdSuccessCircleRadius = 0.9f;
 
-    // 홀드 성공 기준 원의 표시 색상이다.
     [Tooltip("홀드 성공 기준 원의 표시 색상.")]
     [SerializeField]
     private Color holdSuccessCircleColor = new Color(0.2f, 1f, 0.25f, 0.22f);
+
+    [Tooltip("HoldSuccessCircle의 SpriteRenderer sortingOrder.")]
+    [SerializeField]
+    private int holdSuccessCircleSortingOrder = 8;
 
     private readonly Dictionary<Vector2Int, ChunkInstance> activeChunks = new Dictionary<Vector2Int, ChunkInstance>();
     private readonly List<HoldInstance> activeHolds = new List<HoldInstance>();
@@ -75,17 +71,17 @@ public sealed class WorldChunkManager : MonoBehaviour
 
     private RunManager runManager;
     private GameRandomManager randomManager;
-    private RectTransform mapRoot;
-    private RectTransform generatedChunksRoot;
-    private Vector2 viewportSize;
+    private Transform mapRoot;
+    private Transform generatedChunksRoot;
+    private Vector2 viewportWorldSize;
     private float minHoldDistance;
     private float edgeMargin;
     private bool initialized;
-    private float appliedHoldVisualSizeMultiplier = -1f;
+    private float appliedHoldVisualSize = -1f;
     private float appliedHoldSuccessCircleRadius = -1f;
     private Color appliedHoldSuccessCircleColor = Color.clear;
 
-    public Vector2 ViewportSize => viewportSize;
+    public Vector2 ViewportWorldSize => viewportWorldSize;
 
     public void RefreshVisualTuning()
     {
@@ -97,14 +93,14 @@ public sealed class WorldChunkManager : MonoBehaviour
         RefreshHoldVisualTuningIfNeeded();
     }
 
-    public void Initialize(RunManager runManager, GameRandomManager randomManager, RectTransform mapRoot, Vector2 viewportSize)
+    public void Initialize(RunManager runManager, GameRandomManager randomManager, Transform mapRoot, Vector2 viewportWorldSize)
     {
         this.runManager = runManager;
         this.randomManager = randomManager;
         this.mapRoot = mapRoot;
-        this.viewportSize = viewportSize;
-        minHoldDistance = viewportSize.x * minHoldDistanceScreenWidthRatio;
-        edgeMargin = viewportSize.x * edgeMarginScreenWidthRatio;
+        this.viewportWorldSize = viewportWorldSize;
+        minHoldDistance = viewportWorldSize.x * minHoldDistanceViewportWidthRatio;
+        edgeMargin = viewportWorldSize.x * edgeMarginViewportWidthRatio;
 
         generatedChunksRoot = EnsureGeneratedChunksRoot();
         ClearGeneratedChunks();
@@ -122,9 +118,9 @@ public sealed class WorldChunkManager : MonoBehaviour
 
         SetMapOffset(playerWorldPosition);
 
-        int currentChunkX = WorldToChunkIndex(playerWorldPosition.x, viewportSize.x);
-        int bottomChunkY = WorldToChunkIndex(waterSurfaceY, viewportSize.y);
-        int topChunkY = WorldToChunkIndex(playerWorldPosition.y + viewportSize.y * (0.5f + verticalScreenAhead), viewportSize.y);
+        int currentChunkX = WorldToChunkIndex(playerWorldPosition.x, viewportWorldSize.x);
+        int bottomChunkY = WorldToChunkIndex(waterSurfaceY, viewportWorldSize.y);
+        int topChunkY = WorldToChunkIndex(playerWorldPosition.y + viewportWorldSize.y * (0.5f + verticalScreenAhead), viewportWorldSize.y);
 
         int minChunkX = currentChunkX - horizontalChunkRadius;
         int maxChunkX = currentChunkX + horizontalChunkRadius;
@@ -167,17 +163,17 @@ public sealed class WorldChunkManager : MonoBehaviour
     {
         if (mapRoot != null)
         {
-            mapRoot.anchoredPosition = -playerWorldPosition;
+            mapRoot.localPosition = new Vector3(-playerWorldPosition.x, -playerWorldPosition.y, 0f);
         }
     }
 
-    public bool TryGetNearestHoldContainingPoint(Vector2 worldPoint, out Vector2 nearestHoldWorldPosition, out RectTransform nearestHoldRect)
+    public bool TryGetNearestHoldContainingPoint(Vector2 worldPoint, out Vector2 nearestHoldWorldPosition, out Transform nearestHoldRoot)
     {
         float radius = Mathf.Max(0f, holdSuccessCircleRadius);
         float radiusSquared = radius * radius;
         float bestDistanceSquared = float.PositiveInfinity;
         nearestHoldWorldPosition = Vector2.zero;
-        nearestHoldRect = null;
+        nearestHoldRoot = null;
 
         for (int i = 0; i < activeHolds.Count; i++)
         {
@@ -187,29 +183,24 @@ public sealed class WorldChunkManager : MonoBehaviour
             {
                 bestDistanceSquared = distanceSquared;
                 nearestHoldWorldPosition = hold.SuccessWorldPosition;
-                nearestHoldRect = hold.Root;
+                nearestHoldRoot = hold.Root;
             }
         }
 
-        return nearestHoldRect != null;
+        return nearestHoldRoot != null;
     }
 
-    private RectTransform EnsureGeneratedChunksRoot()
+    private Transform EnsureGeneratedChunksRoot()
     {
-        Transform found = mapRoot.Find("GeneratedChunks");
-        RectTransform root = found as RectTransform;
+        Transform root = mapRoot.Find("GeneratedChunks");
         if (root == null)
         {
-            GameObject rootObject = new GameObject("GeneratedChunks", typeof(RectTransform));
-            root = rootObject.GetComponent<RectTransform>();
+            GameObject rootObject = new GameObject("GeneratedChunks");
+            root = rootObject.transform;
             root.SetParent(mapRoot, false);
         }
 
-        root.anchorMin = new Vector2(0.5f, 0.5f);
-        root.anchorMax = new Vector2(0.5f, 0.5f);
-        root.pivot = new Vector2(0.5f, 0.5f);
-        root.anchoredPosition = Vector2.zero;
-        root.sizeDelta = viewportSize;
+        root.localPosition = Vector3.zero;
         root.localScale = Vector3.one;
         root.localRotation = Quaternion.identity;
         return root;
@@ -230,12 +221,12 @@ public sealed class WorldChunkManager : MonoBehaviour
 
     private void CreateChunk(Vector2Int coord)
     {
-        GameObject chunkObject = new GameObject($"Chunk_{coord.x}_{coord.y}", typeof(RectTransform));
-        RectTransform chunkRoot = chunkObject.GetComponent<RectTransform>();
+        GameObject chunkObject = new GameObject($"Chunk_{coord.x}_{coord.y}");
+        Transform chunkRoot = chunkObject.transform;
         chunkRoot.SetParent(generatedChunksRoot, false);
-        PrepareRectTransform(chunkRoot);
-        chunkRoot.sizeDelta = viewportSize;
-        chunkRoot.anchoredPosition = new Vector2(coord.x * viewportSize.x, coord.y * viewportSize.y);
+        chunkRoot.localPosition = new Vector3(coord.x * viewportWorldSize.x, coord.y * viewportWorldSize.y, 0f);
+        chunkRoot.localRotation = Quaternion.identity;
+        chunkRoot.localScale = Vector3.one;
 
         ChunkInstance chunk = new ChunkInstance(coord, chunkRoot);
         activeChunks.Add(coord, chunk);
@@ -253,7 +244,6 @@ public sealed class WorldChunkManager : MonoBehaviour
 
         for (int i = 0; i < holdCount; i++)
         {
-            bool placed = false;
             for (int attempt = 0; attempt < maxPlacementAttemptsPerHold; attempt++)
             {
                 Vector2 localPosition = GetRandomLocalPosition(rng);
@@ -264,13 +254,7 @@ public sealed class WorldChunkManager : MonoBehaviour
 
                 CreateHold(chunk, localPosition);
                 placedLocalPositions.Add(localPosition);
-                placed = true;
                 break;
-            }
-
-            if (!placed)
-            {
-                continue;
             }
         }
     }
@@ -301,31 +285,27 @@ public sealed class WorldChunkManager : MonoBehaviour
     private void CreateHold(ChunkInstance chunk, Vector2 localPosition)
     {
         GameObject holdObject = Instantiate(holdPrefab, chunk.Root);
-        RectTransform holdRoot = holdObject.GetComponent<RectTransform>();
-        if (holdRoot == null)
-        {
-            Debug.LogError("HoldPrefab root requires RectTransform.");
-            Destroy(holdObject);
-            return;
-        }
+        Transform holdRoot = holdObject.transform;
+        holdRoot.localPosition = new Vector3(localPosition.x, localPosition.y, 0f);
+        holdRoot.localRotation = Quaternion.identity;
+        holdRoot.localScale = Vector3.one;
 
-        PrepareRectTransform(holdRoot);
-        holdRoot.anchoredPosition = localPosition;
-
-        RectTransform holdImage = FindChildByName(holdRoot, "HoldImage");
+        Transform holdImage = FindChildByName(holdRoot, "HoldImage");
         if (holdImage == null)
         {
-            Debug.LogError("HoldPrefab requires child RectTransform named HoldImage.");
+            Debug.LogError("HoldPrefab requires child Transform named HoldImage.");
         }
 
-        RectTransform successCircle = CreateHoldSuccessCircle(holdRoot, holdImage);
-        ApplyHoldVisualScale(holdImage);
+        SpriteRenderer holdRenderer = holdImage != null ? holdImage.GetComponent<SpriteRenderer>() : holdRoot.GetComponent<SpriteRenderer>();
+        ApplyHoldVisualScale(holdImage, holdRenderer);
+
+        Transform successCircle = CreateHoldSuccessCircle(holdRoot, holdImage);
         ApplyHoldSuccessCircleVisual(successCircle, holdImage);
 
-        Vector2 successCenterOffset = holdImage != null ? holdImage.anchoredPosition : Vector2.zero;
+        Vector2 successCenterOffset = holdImage != null ? new Vector2(holdImage.localPosition.x, holdImage.localPosition.y) : Vector2.zero;
         Vector2 successWorldPosition = new Vector2(
-            chunk.Coord.x * viewportSize.x + localPosition.x + successCenterOffset.x,
-            chunk.Coord.y * viewportSize.y + localPosition.y + successCenterOffset.y
+            chunk.Coord.x * viewportWorldSize.x + localPosition.x + successCenterOffset.x,
+            chunk.Coord.y * viewportWorldSize.y + localPosition.y + successCenterOffset.y
         );
 
         HoldInstance hold = new HoldInstance(chunk.Coord, holdRoot, holdImage, successCircle, successWorldPosition);
@@ -335,63 +315,69 @@ public sealed class WorldChunkManager : MonoBehaviour
 
     private void RefreshHoldVisualTuningIfNeeded()
     {
-        float safeVisualMultiplier = Mathf.Max(0.01f, holdVisualSizeMultiplier);
+        float safeVisualSize = Mathf.Max(0.01f, holdVisualSize);
         float safeSuccessRadius = Mathf.Max(0f, holdSuccessCircleRadius);
-        bool visualScaleChanged = !Mathf.Approximately(appliedHoldVisualSizeMultiplier, safeVisualMultiplier);
+        bool visualSizeChanged = !Mathf.Approximately(appliedHoldVisualSize, safeVisualSize);
         bool successCircleChanged = !Mathf.Approximately(appliedHoldSuccessCircleRadius, safeSuccessRadius)
             || appliedHoldSuccessCircleColor != holdSuccessCircleColor;
 
-        if (!visualScaleChanged && !successCircleChanged)
+        if (!visualSizeChanged && !successCircleChanged)
         {
             return;
         }
 
-        appliedHoldVisualSizeMultiplier = safeVisualMultiplier;
+        appliedHoldVisualSize = safeVisualSize;
         appliedHoldSuccessCircleRadius = safeSuccessRadius;
         appliedHoldSuccessCircleColor = holdSuccessCircleColor;
 
         for (int i = 0; i < activeHolds.Count; i++)
         {
-            ApplyHoldVisualScale(activeHolds[i].Image);
-            ApplyHoldSuccessCircleVisual(activeHolds[i].SuccessCircle, activeHolds[i].Image);
+            Transform image = activeHolds[i].Image;
+            SpriteRenderer renderer = image != null ? image.GetComponent<SpriteRenderer>() : null;
+            ApplyHoldVisualScale(image, renderer);
+            ApplyHoldSuccessCircleVisual(activeHolds[i].SuccessCircle, image);
         }
     }
 
-    private RectTransform CreateHoldSuccessCircle(RectTransform holdRoot, RectTransform holdImage)
+    private Transform CreateHoldSuccessCircle(Transform holdRoot, Transform holdImage)
     {
         if (holdRoot == null)
         {
             return null;
         }
 
-        GameObject circleObject = new GameObject("HoldSuccessCircle", typeof(RectTransform), typeof(Image));
-        RectTransform circleRect = circleObject.GetComponent<RectTransform>();
-        circleRect.SetParent(holdRoot, false);
-        PrepareRectTransform(circleRect);
-        if (holdImage != null)
-        {
-            circleRect.anchoredPosition = holdImage.anchoredPosition;
-        }
-        circleRect.SetAsLastSibling();
+        GameObject circleObject = new GameObject("HoldSuccessCircle", typeof(SpriteRenderer));
+        Transform circleTransform = circleObject.transform;
+        circleTransform.SetParent(holdRoot, false);
+        circleTransform.localPosition = holdImage != null ? holdImage.localPosition : Vector3.zero;
+        circleTransform.localRotation = Quaternion.identity;
 
-        Image circleImage = circleObject.GetComponent<Image>();
-        circleImage.sprite = CircleSpriteProvider.GetCircleSprite();
-        circleImage.raycastTarget = false;
-        return circleRect;
+        SpriteRenderer renderer = circleObject.GetComponent<SpriteRenderer>();
+        renderer.sprite = RuntimeSpriteFactory.GetCircleSprite();
+        renderer.color = holdSuccessCircleColor;
+        renderer.sortingOrder = holdSuccessCircleSortingOrder;
+        return circleTransform;
     }
 
-    private void ApplyHoldVisualScale(RectTransform holdImage)
+    private void ApplyHoldVisualScale(Transform holdImage, SpriteRenderer renderer)
     {
         if (holdImage == null)
         {
             return;
         }
 
-        float safeMultiplier = Mathf.Max(0.01f, holdVisualSizeMultiplier);
-        holdImage.localScale = Vector3.one * safeMultiplier;
+        holdImage.localRotation = Quaternion.identity;
+        if (renderer != null)
+        {
+            renderer.sortingOrder = holdSortingOrder;
+            ScaleSpriteRendererToWorldSize(renderer, Mathf.Max(0.01f, holdVisualSize));
+            return;
+        }
+
+        holdImage.localScale = Vector3.one * Mathf.Max(0.01f, holdVisualSize);
     }
 
-    private void ApplyHoldSuccessCircleVisual(RectTransform successCircle, RectTransform holdImage)
+    private void ApplyHoldSuccessCircleVisual(Transform successCircle, Transform holdImage)
     {
         if (successCircle == null)
         {
@@ -399,23 +385,24 @@ public sealed class WorldChunkManager : MonoBehaviour
         }
 
         float safeRadius = Mathf.Max(0f, holdSuccessCircleRadius);
-        successCircle.sizeDelta = new Vector2(safeRadius * 2f, safeRadius * 2f);
-        successCircle.anchoredPosition = holdImage != null ? holdImage.anchoredPosition : Vector2.zero;
-        successCircle.SetAsLastSibling();
+        successCircle.localPosition = holdImage != null ? holdImage.localPosition : Vector3.zero;
+        successCircle.localRotation = Quaternion.identity;
+        successCircle.localScale = Vector3.one * (safeRadius * 2f);
 
-        Image circleImage = successCircle.GetComponent<Image>();
-        if (circleImage != null)
+        SpriteRenderer renderer = successCircle.GetComponent<SpriteRenderer>();
+        if (renderer != null)
         {
-            circleImage.color = holdSuccessCircleColor;
+            renderer.color = holdSuccessCircleColor;
+            renderer.sortingOrder = holdSuccessCircleSortingOrder;
         }
     }
 
     private Vector2 GetRandomLocalPosition(System.Random rng)
     {
-        float minX = -viewportSize.x * 0.5f + edgeMargin;
-        float maxX = viewportSize.x * 0.5f - edgeMargin;
-        float minY = -viewportSize.y * 0.5f + edgeMargin;
-        float maxY = viewportSize.y * 0.5f - edgeMargin;
+        float minX = -viewportWorldSize.x * 0.5f + edgeMargin;
+        float maxX = viewportWorldSize.x * 0.5f - edgeMargin;
+        float minY = -viewportWorldSize.y * 0.5f + edgeMargin;
+        float maxY = viewportWorldSize.y * 0.5f - edgeMargin;
 
         return new Vector2(
             Mathf.Lerp(minX, maxX, (float)rng.NextDouble()),
@@ -444,21 +431,12 @@ public sealed class WorldChunkManager : MonoBehaviour
 
     private float GetChunkTopY(int chunkY)
     {
-        return chunkY * viewportSize.y + viewportSize.y * 0.5f;
+        return chunkY * viewportWorldSize.y + viewportWorldSize.y * 0.5f;
     }
 
-    private static void PrepareRectTransform(RectTransform rectTransform)
+    private static Transform FindChildByName(Transform root, string childName)
     {
-        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-        rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        rectTransform.localScale = Vector3.one;
-        rectTransform.localRotation = Quaternion.identity;
-    }
-
-    private static RectTransform FindChildByName(RectTransform root, string childName)
-    {
-        RectTransform[] children = root.GetComponentsInChildren<RectTransform>(true);
+        Transform[] children = root.GetComponentsInChildren<Transform>(true);
         for (int i = 0; i < children.Length; i++)
         {
             if (children[i].name == childName)
@@ -470,51 +448,32 @@ public sealed class WorldChunkManager : MonoBehaviour
         return null;
     }
 
-    private static class CircleSpriteProvider
+    private static void ScaleSpriteRendererToWorldSize(SpriteRenderer renderer, float targetLongAxisSize)
     {
-        private static Sprite circleSprite;
-
-        public static Sprite GetCircleSprite()
+        if (renderer == null || renderer.sprite == null)
         {
-            if (circleSprite != null)
-            {
-                return circleSprite;
-            }
-
-            const int size = 64;
-            Texture2D texture = new Texture2D(size, size, TextureFormat.ARGB32, false);
-            texture.hideFlags = HideFlags.HideAndDontSave;
-            texture.filterMode = FilterMode.Bilinear;
-
-            Color clear = new Color(1f, 1f, 1f, 0f);
-            Color solid = Color.white;
-            Vector2 center = new Vector2((size - 1) * 0.5f, (size - 1) * 0.5f);
-            float radius = (size - 1) * 0.5f;
-            float radiusSquared = radius * radius;
-
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    Vector2 point = new Vector2(x, y);
-                    texture.SetPixel(x, y, (point - center).sqrMagnitude <= radiusSquared ? solid : clear);
-                }
-            }
-
-            texture.Apply();
-            circleSprite = Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), size);
-            circleSprite.hideFlags = HideFlags.HideAndDontSave;
-            return circleSprite;
+            return;
         }
+
+        Vector2 spriteSize = renderer.sprite.bounds.size;
+        float longAxis = Mathf.Max(spriteSize.x, spriteSize.y);
+        if (longAxis <= 0f)
+        {
+            renderer.transform.localScale = Vector3.one;
+            return;
+        }
+
+        float scale = targetLongAxisSize / longAxis;
+        renderer.transform.localScale = Vector3.one * scale;
     }
 
     private sealed class ChunkInstance
     {
         public readonly Vector2Int Coord;
-        public readonly RectTransform Root;
+        public readonly Transform Root;
         public readonly List<HoldInstance> Holds = new List<HoldInstance>();
 
-        public ChunkInstance(Vector2Int coord, RectTransform root)
+        public ChunkInstance(Vector2Int coord, Transform root)
         {
             Coord = coord;
             Root = root;
@@ -524,16 +483,16 @@ public sealed class WorldChunkManager : MonoBehaviour
     private sealed class HoldInstance
     {
         public readonly Vector2Int ChunkCoord;
-        public readonly RectTransform Root;
-        public readonly RectTransform Image;
-        public readonly RectTransform SuccessCircle;
+        public readonly Transform Root;
+        public readonly Transform Image;
+        public readonly Transform SuccessCircle;
         public readonly Vector2 SuccessWorldPosition;
 
         public HoldInstance(
             Vector2Int chunkCoord,
-            RectTransform root,
-            RectTransform image,
-            RectTransform successCircle,
+            Transform root,
+            Transform image,
+            Transform successCircle,
             Vector2 successWorldPosition
         )
         {
