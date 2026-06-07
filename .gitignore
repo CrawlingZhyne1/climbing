@@ -1,0 +1,13 @@
+# Ignore everything at repository root.
+/*
+
+# Keep gitignore itself.
+!/.gitignore
+
+# Keep only Unity project source/config folders.
+!/Assets/
+!/Assets/**
+!/Packages/
+!/Packages/**
+!/ProjectSettings/
+!/ProjectSettings/**
