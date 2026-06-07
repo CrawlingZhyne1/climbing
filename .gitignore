@@ -3,6 +3,7 @@
 
 # Keep gitignore itself.
 !/.gitignore
+!/README.md
 
 # Keep only Unity project source/config folders.
 !/Assets/
