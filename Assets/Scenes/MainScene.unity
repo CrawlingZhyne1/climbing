@@ -376,7 +376,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9d7c1b45d79e4e946b6e0a83f6a2ba8b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerClimbManager
-  characterPrefab: {fileID: 211674656046220901, guid: 92b181959244c95418327789e09deca8, type: 3}
+  characterPrefab: {fileID: 7255737125166163989, guid: 4ff3a7a4bbb4390468562752841adc5c, type: 3}
   holdButtonPrefab: {fileID: 505982488646747632, guid: cbb1e62e925aa2143a8072bb5b6c7126, type: 3}
   maxDragDistanceScreenWidthRatio: 0.16666667
   maxLaunchSpeed: 5
@@ -397,8 +397,6 @@ MonoBehaviour:
   trajectoryPointColor: {r: 0, g: 0.68229055, b: 1, a: 0.7019608}
   dragStartCircleSize: 1
   dragCurrentCircleSize: 1
-  characterSortingOrder: 20
-  generatedVisualSortingOrder: 30
 --- !u!1 &289185048
 GameObject:
   m_ObjectHideFlags: 0
@@ -452,10 +450,8 @@ MonoBehaviour:
   edgeMarginViewportWidthRatio: 0.03125
   maxPlacementAttemptsPerHold: 30
   holdVisualSize: 0.75
-  holdSortingOrder: 10
   holdSuccessCircleRadius: 1
   holdSuccessCircleColor: {r: 0.2, g: 1, b: 0.25, a: 0.22}
-  holdSuccessCircleSortingOrder: 8
 --- !u!1 &370462469
 GameObject:
   m_ObjectHideFlags: 0
@@ -1043,15 +1039,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42189a6dfed7b5342bccdafebda61e87, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WaterManager
-  baseWaterSpeed: 5
-  speedGrowthIntervalSeconds: 5
+  baseWaterSpeed: 1
+  speedGrowthIntervalSeconds: 10
   speedGrowthMultiplier: 1.1
-  initialOffsetBelowViewportBottom: 10
+  initialOffsetBelowViewportBottom: 30
   waterVisual: {fileID: 0}
   generatedWaterColor: {r: 0.1, g: 0.45, b: 1, a: 0.55}
   waterWidthViewportMultiplier: 3
   waterHeightViewportMultiplier: 2
-  waterSortingOrder: -20
   waterDistanceText: {fileID: 628056124}
   distanceTextFixedRoot: {fileID: 1741801678}
   forceDistanceTextScreenFixed: 1

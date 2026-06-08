@@ -1,7 +1,7 @@
 // 플레이어 입력, 발사, 포물선 이동, 홀드 시도를 관리한다.
-// 캐릭터 손 기준점을 월드 원점에 정렬한다.
-// 드래그 거리를 월드 발사 속도로 변환한다.
-// 포물선 preview와 손 위치 시각점을 SpriteRenderer로 표시한다.
+// 캐릭터 HoldingPoint를 GameplayVisualRoot 원점에 정렬한다.
+// CharacterRagdollView에 상태 전환만 전달하고 판정에는 사용하지 않는다.
+// CharacterImage는 Gameplay 레이어의 낮은 order로 유지한다.
 // 홀드 버튼은 screen-space UI로 생성한다.
 using System.Collections.Generic;
 using UnityEngine;
@@ -116,6 +116,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
     private Transform characterRoot;
     private Transform characterImage;
     private Transform holdingPoint;
+    private CharacterRagdollView characterRagdollView;
     private Transform dragStartCircle;
     private Transform dragCurrentCircle;
     private Transform handPointVisual;
@@ -136,7 +137,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
 
     private const string GameplaySortingLayer = "Gameplay";
     private const string GameplayOverlaySortingLayer = "GameplayOverlay";
-    private const int CharacterSortingOrder = 0;
+    private const int CharacterSortingOrder = -10;
     private const int TrajectoryPointSortingOrder = 0;
     private const int DragStartCircleSortingOrder = 10;
     private const int DragCurrentCircleSortingOrder = 20;
@@ -187,6 +188,8 @@ public sealed class PlayerClimbManager : MonoBehaviour
         AlignHoldingPointToWorldCenter();
         RefreshHandPointVisual();
         worldChunkManager.SetMapOffset(PlayerWorldPosition);
+        characterRagdollView?.ResetView(holdingPoint);
+        characterRagdollView?.EnterHolding();
     }
 
     public void ManagedUpdate(float deltaTime)
@@ -220,6 +223,8 @@ public sealed class PlayerClimbManager : MonoBehaviour
                 UpdateFlight(deltaTime);
                 break;
         }
+
+        characterRagdollView?.ManagedUpdate(deltaTime);
     }
 
     public void OnGameOver()
@@ -229,6 +234,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         DestroyHoldButton();
         velocity = Vector2.zero;
         activeFingerId = NoFinger;
+        characterRagdollView?.EnterGameOver();
     }
 
     private void CreateCharacter()
@@ -248,15 +254,19 @@ public sealed class PlayerClimbManager : MonoBehaviour
 
         characterImage = FindChildByName(characterRoot, "CharacterImage");
         holdingPoint = FindChildByName(characterRoot, "HoldingPoint");
+        characterRagdollView = characterRoot.GetComponentInChildren<CharacterRagdollView>(true);
 
-        if (characterImage == null || holdingPoint == null)
+        if (holdingPoint == null)
         {
-            Debug.LogError("CharacterPrefab requires CharacterImage and HoldingPoint children.");
+            Debug.LogError("CharacterPrefab requires a HoldingPoint child under the prefab root.");
             enabled = false;
             return;
         }
 
-        ApplySpriteSortingToChildren(characterImage, GameplaySortingLayer, CharacterSortingOrder);
+        if (characterImage != null)
+        {
+            ApplySpriteSortingToChildren(characterImage, GameplaySortingLayer, CharacterSortingOrder);
+        }
 
         RefreshCharacterVisualSizing();
         AlignHoldingPointToWorldCenter();
@@ -264,9 +274,27 @@ public sealed class PlayerClimbManager : MonoBehaviour
 
     private void CreateGeneratedVisuals()
     {
-        dragStartCircle = CreateCircle("DragStartCircle", gameplayVisualRoot, dragStartCircleSize, new Color(1f, 1f, 1f, 0.55f), DragStartCircleSortingOrder);
-        dragCurrentCircle = CreateCircle("DragCurrentCircle", gameplayVisualRoot, dragCurrentCircleSize, new Color(0.2f, 0.55f, 1f, 0.75f), DragCurrentCircleSortingOrder);
-        handPointVisual = CreateCircle("HandPointVisual", gameplayVisualRoot, handPointVisualSize, handPointVisualColor, HandPointVisualSortingOrder);
+        dragStartCircle = CreateCircle(
+            "DragStartCircle",
+            gameplayVisualRoot,
+            dragStartCircleSize,
+            new Color(1f, 1f, 1f, 0.55f),
+            DragStartCircleSortingOrder
+        );
+        dragCurrentCircle = CreateCircle(
+            "DragCurrentCircle",
+            gameplayVisualRoot,
+            dragCurrentCircleSize,
+            new Color(0.2f, 0.55f, 1f, 0.75f),
+            DragCurrentCircleSortingOrder
+        );
+        handPointVisual = CreateCircle(
+            "HandPointVisual",
+            gameplayVisualRoot,
+            handPointVisualSize,
+            handPointVisualColor,
+            HandPointVisualSortingOrder
+        );
         HideAimingVisuals();
     }
 
@@ -288,6 +316,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
             activeFingerId = fingerId;
             pressScreenPosition = screenPosition;
             runManager.SetState(RunManager.RunState.Aiming);
+            characterRagdollView?.EnterAiming();
             ShowAimingVisuals(screenPosition, screenPosition);
         }
     }
@@ -384,6 +413,8 @@ public sealed class PlayerClimbManager : MonoBehaviour
             velocity = Vector2.zero;
             DestroyHoldButton();
             worldChunkManager.SetMapOffset(PlayerWorldPosition);
+            AlignHoldingPointToWorldCenter();
+            characterRagdollView?.EnterHoldSuccess();
             runManager.SetState(RunManager.RunState.Holding);
             return;
         }
@@ -410,6 +441,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         HideAimingVisuals();
         HideTrajectory();
         CreateHoldButton(buttonScreenPosition);
+        characterRagdollView?.EnterFlying(launchVelocity);
         runManager.SetState(RunManager.RunState.Flying);
     }
 
@@ -418,6 +450,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         activeFingerId = NoFinger;
         HideAimingVisuals();
         HideTrajectory();
+        characterRagdollView?.EnterHolding();
         runManager.SetState(RunManager.RunState.Holding);
     }
 
