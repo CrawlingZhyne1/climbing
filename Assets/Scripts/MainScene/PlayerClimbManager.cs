@@ -1,6 +1,6 @@
 // 플레이어 입력, 발사, 포물선 이동, 홀드 시도를 관리한다.
 // 캐릭터 HoldingPoint를 GameplayVisualRoot 원점에 정렬한다.
-// CharacterRagdollView에 상태 전환만 전달하고 판정에는 사용하지 않는다.
+// CharacterRagdollView에 상태 전환과 드래그 비율만 전달하고 판정에는 사용하지 않는다.
 // CharacterImage는 Gameplay 레이어의 낮은 order로 유지한다.
 // 홀드 버튼은 screen-space UI로 생성한다.
 using System.Collections.Generic;
@@ -317,6 +317,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
             pressScreenPosition = screenPosition;
             runManager.SetState(RunManager.RunState.Aiming);
             characterRagdollView?.EnterAiming();
+            characterRagdollView?.SetAimingPull(0f);
             ShowAimingVisuals(screenPosition, screenPosition);
         }
     }
@@ -342,6 +343,8 @@ public sealed class PlayerClimbManager : MonoBehaviour
         }
 
         Vector2 clampedScreenPosition = ClampDragPosition(pressScreenPosition, currentScreenPosition);
+        float pullRatio = CalculatePullRatio(clampedScreenPosition);
+        characterRagdollView?.SetAimingPull(pullRatio);
         ShowAimingVisuals(pressScreenPosition, clampedScreenPosition);
 
         Vector2 launchVelocity = CalculateLaunchVelocity(clampedScreenPosition);
@@ -466,12 +469,17 @@ public sealed class PlayerClimbManager : MonoBehaviour
         return pressPosition + offset;
     }
 
+    private float CalculatePullRatio(Vector2 clampedScreenPosition)
+    {
+        float maxDragDistance = Mathf.Max(1f, Screen.width * maxDragDistanceScreenWidthRatio);
+        return Mathf.Clamp01((pressScreenPosition - clampedScreenPosition).magnitude / maxDragDistance);
+    }
+
     private Vector2 CalculateLaunchVelocity(Vector2 clampedScreenPosition)
     {
-        float maxDragDistance = Screen.width * maxDragDistanceScreenWidthRatio;
         Vector2 aimScreenVector = pressScreenPosition - clampedScreenPosition;
         Vector2 aimWorldVector = runManager.ScreenDeltaToWorldDelta(aimScreenVector);
-        float pullRatio = Mathf.Clamp01(aimScreenVector.magnitude / maxDragDistance);
+        float pullRatio = CalculatePullRatio(clampedScreenPosition);
         if (aimWorldVector.sqrMagnitude <= 0.0001f)
         {
             return Vector2.zero;
