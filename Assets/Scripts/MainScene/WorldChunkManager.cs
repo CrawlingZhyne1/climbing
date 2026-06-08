@@ -1,7 +1,7 @@
 // 월드 좌표계에서 청크와 홀드를 생성한다.
 // 현재 플레이어 위치와 수면 위치를 기준으로 활성 청크를 유지한다.
 // 각 청크에는 시드 기반으로 8~12개의 홀드를 배치한다.
-// 각 홀드 이미지 뒤에 성공 기준 원을 표시한다.
+// 각 홀드 이미지와 성공 기준 원을 정해진 Sorting Layer에 표시한다.
 // 캐릭터 손 중앙점이 성공 기준 원 안에 들어왔는지 검사한다.
 using System.Collections.Generic;
 using UnityEngine;
@@ -48,10 +48,6 @@ public sealed class WorldChunkManager : MonoBehaviour
     [SerializeField]
     private float holdVisualSize = 0.75f;
 
-    [Tooltip("HoldImage의 SpriteRenderer sortingOrder.")]
-    [SerializeField]
-    private int holdSortingOrder = 10;
-
     [Header("Hold Success Circle")]
     [Tooltip("홀드 성공 기준 원의 반지름. 캐릭터 손 중앙점이 이 원 안에 들어오면 홀드 성공.")]
     [SerializeField]
@@ -61,15 +57,10 @@ public sealed class WorldChunkManager : MonoBehaviour
     [SerializeField]
     private Color holdSuccessCircleColor = new Color(0.2f, 1f, 0.25f, 0.22f);
 
-    [Tooltip("HoldSuccessCircle의 SpriteRenderer sortingOrder.")]
-    [SerializeField]
-    private int holdSuccessCircleSortingOrder = 8;
-
     private readonly Dictionary<Vector2Int, ChunkInstance> activeChunks = new Dictionary<Vector2Int, ChunkInstance>();
     private readonly List<HoldInstance> activeHolds = new List<HoldInstance>();
     private readonly List<Vector2Int> removalBuffer = new List<Vector2Int>();
 
-    private RunManager runManager;
     private GameRandomManager randomManager;
     private Transform mapRoot;
     private Transform generatedChunksRoot;
@@ -77,6 +68,10 @@ public sealed class WorldChunkManager : MonoBehaviour
     private float minHoldDistance;
     private float edgeMargin;
     private bool initialized;
+
+    private const string GeneratedChunksSortingLayer = "GeneratedChunks";
+    private const int HoldSortingOrder = 0;
+    private const int HoldSuccessCircleSortingOrder = 10;
     private float appliedHoldVisualSize = -1f;
     private float appliedHoldSuccessCircleRadius = -1f;
     private Color appliedHoldSuccessCircleColor = Color.clear;
@@ -93,9 +88,8 @@ public sealed class WorldChunkManager : MonoBehaviour
         RefreshHoldVisualTuningIfNeeded();
     }
 
-    public void Initialize(RunManager runManager, GameRandomManager randomManager, Transform mapRoot, Vector2 viewportWorldSize)
+    public void Initialize(GameRandomManager randomManager, Transform mapRoot, Vector2 viewportWorldSize)
     {
-        this.runManager = runManager;
         this.randomManager = randomManager;
         this.mapRoot = mapRoot;
         this.viewportWorldSize = viewportWorldSize;
@@ -355,7 +349,7 @@ public sealed class WorldChunkManager : MonoBehaviour
         SpriteRenderer renderer = circleObject.GetComponent<SpriteRenderer>();
         renderer.sprite = RuntimeSpriteFactory.GetCircleSprite();
         renderer.color = holdSuccessCircleColor;
-        renderer.sortingOrder = holdSuccessCircleSortingOrder;
+        ApplySpriteSorting(renderer, GeneratedChunksSortingLayer, HoldSuccessCircleSortingOrder);
         return circleTransform;
     }
 
@@ -369,7 +363,7 @@ public sealed class WorldChunkManager : MonoBehaviour
         holdImage.localRotation = Quaternion.identity;
         if (renderer != null)
         {
-            renderer.sortingOrder = holdSortingOrder;
+            ApplySpriteSorting(renderer, GeneratedChunksSortingLayer, HoldSortingOrder);
             ScaleSpriteRendererToWorldSize(renderer, Mathf.Max(0.01f, holdVisualSize));
             return;
         }
@@ -393,7 +387,7 @@ public sealed class WorldChunkManager : MonoBehaviour
         if (renderer != null)
         {
             renderer.color = holdSuccessCircleColor;
-            renderer.sortingOrder = holdSuccessCircleSortingOrder;
+            ApplySpriteSorting(renderer, GeneratedChunksSortingLayer, HoldSuccessCircleSortingOrder);
         }
     }
 
@@ -446,6 +440,17 @@ public sealed class WorldChunkManager : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static void ApplySpriteSorting(SpriteRenderer renderer, string sortingLayerName, int sortingOrder)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.sortingLayerName = sortingLayerName;
+        renderer.sortingOrder = sortingOrder;
     }
 
     private static void ScaleSpriteRendererToWorldSize(SpriteRenderer renderer, float targetLongAxisSize)

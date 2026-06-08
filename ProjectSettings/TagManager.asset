@@ -2,7 +2,7 @@
 %TAG !u! tag:unity3d.com,2011:
 --- !u!78 &1
 TagManager:
-  serializedVersion: 2
+  serializedVersion: 3
   tags: []
   layers:
   - Default
@@ -11,7 +11,7 @@ TagManager:
   - 
   - Water
   - UI
-  - 
+  - background
   - 
   - 
   - 
@@ -41,3 +41,20 @@ TagManager:
   - name: Default
     uniqueID: 0
     locked: 0
+  - name: Background
+    uniqueID: 2797984089
+    locked: 0
+  - name: GeneratedChunks
+    uniqueID: 316558731
+    locked: 0
+  - name: Gameplay
+    uniqueID: 2518816367
+    locked: 0
+  - name: Water
+    uniqueID: 566143689
+    locked: 0
+  - name: GameplayOverlay
+    uniqueID: 2821429701
+    locked: 0
+  m_RenderingLayers:
+  - Default

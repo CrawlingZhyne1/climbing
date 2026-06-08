@@ -42,10 +42,6 @@ public sealed class WaterManager : MonoBehaviour
     [SerializeField]
     private float waterHeightViewportMultiplier = 2f;
 
-    [Tooltip("WaterVisual의 SpriteRenderer sortingOrder.")]
-    [SerializeField]
-    private int waterSortingOrder = -20;
-
     [Header("Distance Text")]
     [Tooltip("플레이어와 수면 사이의 거리를 표시할 TMP 텍스트. Canvas에 고정된 TextMeshProUGUI를 연결한다.")]
     [SerializeField]
@@ -90,6 +86,9 @@ public sealed class WaterManager : MonoBehaviour
     private SpriteRenderer waterRenderer;
     private float elapsedTime;
     private bool initialized;
+
+    private const string WaterSortingLayer = "Water";
+    private const int WaterSortingOrder = 0;
 
     public float WaterSurfaceY { get; private set; }
 
@@ -138,7 +137,7 @@ public sealed class WaterManager : MonoBehaviour
         if (waterRenderer != null)
         {
             waterRenderer.color = generatedWaterColor;
-            waterRenderer.sortingOrder = waterSortingOrder;
+            ApplySpriteSorting(waterRenderer, WaterSortingLayer, WaterSortingOrder);
         }
     }
 
@@ -215,6 +214,17 @@ public sealed class WaterManager : MonoBehaviour
         return canvasRect;
     }
 
+    private static void ApplySpriteSorting(SpriteRenderer renderer, string sortingLayerName, int sortingOrder)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.sortingLayerName = sortingLayerName;
+        renderer.sortingOrder = sortingOrder;
+    }
+
     private void EnsureWaterVisual()
     {
         if (waterVisual == null && mapRoot != null)
@@ -238,6 +248,6 @@ public sealed class WaterManager : MonoBehaviour
 
         waterRenderer.sprite = RuntimeSpriteFactory.GetSquareSprite();
         waterRenderer.color = generatedWaterColor;
-        waterRenderer.sortingOrder = waterSortingOrder;
+        ApplySpriteSorting(waterRenderer, WaterSortingLayer, WaterSortingOrder);
     }
 }

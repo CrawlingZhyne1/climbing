@@ -149,7 +149,7 @@ public sealed class RunManager : MonoBehaviour
         buttonRoot = EnsureCanvasRoot(buttonRoot, "ButtonRoot");
 
         randomManager.BeginNewRun();
-        worldChunkManager.Initialize(this, randomManager, mapRoot, ViewportWorldSize);
+        worldChunkManager.Initialize(randomManager, mapRoot, ViewportWorldSize);
         playerClimbManager.Initialize(
             this,
             worldChunkManager,

@@ -102,13 +102,6 @@ public sealed class PlayerClimbManager : MonoBehaviour
     [SerializeField]
     private float dragCurrentCircleSize = 0.35f;
 
-    [Header("Sorting")]
-    [SerializeField]
-    private int characterSortingOrder = 20;
-
-    [SerializeField]
-    private int generatedVisualSortingOrder = 30;
-
     public Vector2 PlayerWorldPosition { get; private set; }
     public Vector2 Velocity => velocity;
 
@@ -134,13 +127,20 @@ public sealed class PlayerClimbManager : MonoBehaviour
 
     private Vector2 velocity;
     private Vector2 pressScreenPosition;
-    private Vector2 lastClampedDragScreenPosition;
     private int activeFingerId = NoFinger;
     private int remainingHoldAttempts;
     private float cooldownTimer;
     private bool initialized;
     private float appliedCharacterVisualSizeMultiplier = -1f;
     private float appliedHandPointVisualSize = -1f;
+
+    private const string GameplaySortingLayer = "Gameplay";
+    private const string GameplayOverlaySortingLayer = "GameplayOverlay";
+    private const int CharacterSortingOrder = 0;
+    private const int TrajectoryPointSortingOrder = 0;
+    private const int DragStartCircleSortingOrder = 10;
+    private const int DragCurrentCircleSortingOrder = 20;
+    private const int HandPointVisualSortingOrder = 30;
 
     private const int NoFinger = int.MinValue;
     private const int MouseFinger = -100;
@@ -256,11 +256,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
             return;
         }
 
-        SpriteRenderer characterRenderer = characterImage.GetComponent<SpriteRenderer>();
-        if (characterRenderer != null)
-        {
-            characterRenderer.sortingOrder = characterSortingOrder;
-        }
+        ApplySpriteSortingToChildren(characterImage, GameplaySortingLayer, CharacterSortingOrder);
 
         RefreshCharacterVisualSizing();
         AlignHoldingPointToWorldCenter();
@@ -268,9 +264,9 @@ public sealed class PlayerClimbManager : MonoBehaviour
 
     private void CreateGeneratedVisuals()
     {
-        dragStartCircle = CreateCircle("DragStartCircle", gameplayVisualRoot, dragStartCircleSize, new Color(1f, 1f, 1f, 0.55f));
-        dragCurrentCircle = CreateCircle("DragCurrentCircle", gameplayVisualRoot, dragCurrentCircleSize, new Color(0.2f, 0.55f, 1f, 0.75f));
-        handPointVisual = CreateCircle("HandPointVisual", gameplayVisualRoot, handPointVisualSize, handPointVisualColor);
+        dragStartCircle = CreateCircle("DragStartCircle", gameplayVisualRoot, dragStartCircleSize, new Color(1f, 1f, 1f, 0.55f), DragStartCircleSortingOrder);
+        dragCurrentCircle = CreateCircle("DragCurrentCircle", gameplayVisualRoot, dragCurrentCircleSize, new Color(0.2f, 0.55f, 1f, 0.75f), DragCurrentCircleSortingOrder);
+        handPointVisual = CreateCircle("HandPointVisual", gameplayVisualRoot, handPointVisualSize, handPointVisualColor, HandPointVisualSortingOrder);
         HideAimingVisuals();
     }
 
@@ -279,7 +275,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         trajectoryPoints.Clear();
         for (int i = 0; i < trajectoryPointCount; i++)
         {
-            Transform point = CreateCircle("TrajectoryPoint", gameplayVisualRoot, trajectoryPointSize, trajectoryPointColor);
+            Transform point = CreateCircle("TrajectoryPoint", gameplayVisualRoot, trajectoryPointSize, trajectoryPointColor, TrajectoryPointSortingOrder);
             point.gameObject.SetActive(false);
             trajectoryPoints.Add(point);
         }
@@ -291,7 +287,6 @@ public sealed class PlayerClimbManager : MonoBehaviour
         {
             activeFingerId = fingerId;
             pressScreenPosition = screenPosition;
-            lastClampedDragScreenPosition = screenPosition;
             runManager.SetState(RunManager.RunState.Aiming);
             ShowAimingVisuals(screenPosition, screenPosition);
         }
@@ -318,7 +313,6 @@ public sealed class PlayerClimbManager : MonoBehaviour
         }
 
         Vector2 clampedScreenPosition = ClampDragPosition(pressScreenPosition, currentScreenPosition);
-        lastClampedDragScreenPosition = clampedScreenPosition;
         ShowAimingVisuals(pressScreenPosition, clampedScreenPosition);
 
         Vector2 launchVelocity = CalculateLaunchVelocity(clampedScreenPosition);
@@ -486,6 +480,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
             if (pointRenderer != null)
             {
                 pointRenderer.color = trajectoryPointColor;
+                ApplySpriteSorting(pointRenderer, GameplayOverlaySortingLayer, TrajectoryPointSortingOrder);
             }
 
             point.gameObject.SetActive(true);
@@ -622,6 +617,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
         if (handPointRenderer != null)
         {
             handPointRenderer.color = handPointVisualColor;
+            ApplySpriteSorting(handPointRenderer, GameplayOverlaySortingLayer, HandPointVisualSortingOrder);
         }
 
         handPointVisual.gameObject.SetActive(true);
@@ -877,7 +873,7 @@ public sealed class PlayerClimbManager : MonoBehaviour
     }
 #endif
 
-    private Transform CreateCircle(string objectName, Transform parent, float diameter, Color color)
+    private Transform CreateCircle(string objectName, Transform parent, float diameter, Color color, int sortingOrder)
     {
         GameObject circleObject = new GameObject(objectName, typeof(SpriteRenderer));
         Transform circleTransform = circleObject.transform;
@@ -889,8 +885,33 @@ public sealed class PlayerClimbManager : MonoBehaviour
         SpriteRenderer renderer = circleObject.GetComponent<SpriteRenderer>();
         renderer.sprite = RuntimeSpriteFactory.GetCircleSprite();
         renderer.color = color;
-        renderer.sortingOrder = generatedVisualSortingOrder;
+        ApplySpriteSorting(renderer, GameplayOverlaySortingLayer, sortingOrder);
         return circleTransform;
+    }
+
+    private static void ApplySpriteSortingToChildren(Transform root, string sortingLayerName, int sortingOrder)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        SpriteRenderer[] renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            ApplySpriteSorting(renderers[i], sortingLayerName, sortingOrder);
+        }
+    }
+
+    private static void ApplySpriteSorting(SpriteRenderer renderer, string sortingLayerName, int sortingOrder)
+    {
+        if (renderer == null)
+        {
+            return;
+        }
+
+        renderer.sortingLayerName = sortingLayerName;
+        renderer.sortingOrder = sortingOrder;
     }
 
     private static void PrepareRectTransform(RectTransform rectTransform)
